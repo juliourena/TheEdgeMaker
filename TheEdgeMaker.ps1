@@ -366,19 +366,6 @@ Write-Output "`n## Making Users Group's Owner"
 Make-GroupOwner -userPrincipalName Abigail.Davis@$primaryDomain -groupName "HR Group"
 Make-GroupOwner -userPrincipalName Charlotte.Moore@$primaryDomain -groupName "Subscription Reader"
 
-### Add reader rights over the subscription to Subscription Reader
-$readerGroup = Get-AzureADGroup -SearchString "Subscription Reader"
-$readerRole = Get-AzRoleAssignment -ObjectId $readerGroup.ObjectId -Scope "/subscriptions/$subscriptionId"
-
-# Check if the role assignment exists
-if ($readerRole) {
-    Write-Output "[*] The role assignment for '$($readerGroup.DisplayName)' already exists."
-} else {
-    # Assign the Reader role to the Subscription Reader group
-    New-AzRoleAssignment -ObjectId $readerGroup.ObjectId -RoleDefinitionName "Reader" -Scope "/subscriptions/$subscriptionId"
-    Write-Output "[+] The role assignment for '$($readerGroup.DisplayName)' was added successfully."
-}
-
 function Create-AzureVM {
     param (
         [string]$vmName,
@@ -563,3 +550,16 @@ Function Add-AzRoleToVM {
 
 Write-Output "`n## Adding Role to User for Azure VMs"
 Add-AzRoleToVM -userPrincipalName "Madison.Johnson@$primaryDomain" -roleName Owner -vmResourceGroup Production -vmName "AzVM-01"
+
+### Add reader rights over the subscription to Subscription Reader
+$readerGroup = Get-AzureADGroup -SearchString "Subscription Reader"
+$readerRole = Get-AzRoleAssignment -ObjectId $readerGroup.ObjectId -Scope "/subscriptions/$subscriptionId"
+
+# Check if the role assignment exists
+if ($readerRole) {
+    Write-Output "[*] The role assignment for '$($readerGroup.DisplayName)' already exists."
+} else {
+    # Assign the Reader role to the Subscription Reader group
+    New-AzRoleAssignment -ObjectId $readerGroup.ObjectId -RoleDefinitionName "Reader" -Scope "/subscriptions/$subscriptionId"
+    Write-Output "[+] The role assignment for '$($readerGroup.DisplayName)' was added successfully."
+}
