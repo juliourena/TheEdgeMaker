@@ -142,8 +142,7 @@ Function Create-AzureADUsers {
                 -MailNickName $MailNickName `
                 -UserPrincipalName $userPrincipalName `
                 -PasswordProfile $PasswordProfile
-                
-        
+
         Write-OutPut "[+] AAD Account Created Successfully - $displayName"
 
         # Add the user and password to the user list
