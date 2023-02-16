@@ -9,21 +9,34 @@ License: GPL-3.0 license
 $global:location = "East US"
 
 Try {
+    # Check if NuGet provider is installed
+    if (!(Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
+        # Install NuGet provider if not installed
+        Install-PackageProvider -Name NuGet -Force
+    }
+
+} Catch {
+    Write-Error "[-] Error Installing NuGet. Clossing."
+    break
+}
+
+
+Try {
     Import-Module -Name AzureAD -ErrorAction Stop -Verbose:$false | Out-Null
 }
 Catch {
-    Write-Verbose "Azure AD PowerShell Module not found..."
-    Write-Verbose "Installing Azure AD PowerShell Module..."
-    Install-Module -Name AzureAD -Force -AllowClobber -Force
+    Write-Output "[+] Azure AD PowerShell Module not found..."
+    Write-Output "[+]Installing Azure AD PowerShell Module..."
+    Install-Module -Name AzureAD -Force -AllowClobber
 }
 
 Try {
     Import-Module -Name Az -ErrorAction Stop -Verbose:$false | Out-Null
 }
 Catch {
-    Write-Verbose "Az PowerShell Module not found..."
-    Write-Verbose "Installing Az PowerShell Module..."
-    Install-Module -Name Az -Force -AllowClobber -Force
+    Write-Output "[+] Az PowerShell Module not found..."
+    Write-Output "[+] Installing Az PowerShell Module..."
+    Install-Module -Name Az -Force -AllowClobber
 }
 
 Try {
@@ -36,7 +49,7 @@ Try {
     $accountId = $context.Account.Id
 }
 Catch {
-    Write-Verbose "Cannot connect to Azure Tentant. Please check your credentials. Exiting!"
+    Write-Output "[-] Cannot connect to Azure Tentant. Please check your credentials. Exiting!"
     Break
 }
 
@@ -45,7 +58,7 @@ Try {
     Connect-AzureAD -TenantId $tenantId -AccountId $accountId -ErrorAction Stop | Out-Null
 }
 Catch {
-    Write-Verbose "Cannot connect to Azure AD. Please check your credentials. Exiting!"
+    Write-Output "[-] Cannot connect to Azure AD. Please check your credentials. Exiting!"
     Break
 }
 
@@ -57,6 +70,22 @@ $tenantDetails = Get-AzTenant -TenantId $tenantId
 
 # Extract the primary domain from the Domains property
 $primaryDomain = $tenantDetails.Domains | Select-Object -First 1
+
+# Prompt the user if they want to change the default location
+$response = Read-Host "The current location is '$($global:location)'. Do you want to change it? (Y/N)"
+
+# If the user responds with 'Y' or 'y', prompt them for a new location
+if ($response.ToLower() -eq 'y') {
+    do {
+        $newLocation = Read-Host "Enter a new location"
+    } until ((Get-AzLocation -Name $newLocation -ErrorAction SilentlyContinue) -ne $null)
+
+    # Update the global location variable with the new value
+    $global:location = $newLocation
+}
+
+# Output the current location
+Write-Host "`n## The current location is '$($global:location)'."
 
 ### Create Azure AD Users 
 Function Create-AzureADUsers {
@@ -89,18 +118,31 @@ Function Create-AzureADUsers {
         # Create the user principal name
         $userPrincipalName = "$selectedName.$selectedLastName@$primaryDomain"
 
+        # Check if the user already exists
+        if ((Get-AzureADUser -ObjectId $userPrincipalName -ErrorAction SilentlyContinue) -ne $null) {
+            Write-Output "[*] AAD Account Already Exists - $displayName"
+            continue
+        }
+
         # Create a random password
         $PasswordProfile = New-Object -TypeName Microsoft.Open.AzureAD.Model.PasswordProfile
-        $PasswordProfile.Password = "HacktheboxAcademy01!"
+        
+        if ($selectedName -eq "Isabella") {
+            $PasswordProfile.Password = "HacktheboxAcademy01!"
+        } else {
+            $PasswordProfile.Password = [System.Web.Security.Membership]::GeneratePassword(12, 2)
+        }
+
         $PasswordProfile.ForceChangePasswordNextLogin = $false
 
         # Create the user in Azure AD
         $user = New-AzureADUser `
                 -AccountEnabled $true `
                 -DisplayName $displayName `
-                -MailNickName $MailNickName`
+                -MailNickName $MailNickName `
                 -UserPrincipalName $userPrincipalName `
                 -PasswordProfile $PasswordProfile
+                
         
         Write-OutPut "[+] AAD Account Created Successfully - $displayName"
 
@@ -118,14 +160,14 @@ Function Create-AzureADUsers {
   
   # Save the list of users and passwords to a file in the current directory
   try {
-    $userList | Export-Csv -Path "user-list.csv" -NoTypeInformation
+    $userList | Export-Csv -Path "user-list.csv" -NoTypeInformation -Force
   } catch {
     Write-Error "[-] Failed to write the file: $_"
   }
 }
 
 # Create-AzureADUsers -NumberOfUsers 5
-
+Write-Output "`n## Creating Users"
 Create-AzureADUsers
 
 ###### Create Resource Groups ######
@@ -136,9 +178,9 @@ Function Create-ResourceGroup {
     )
     Try {
         if (Get-AzResourceGroup -Name $resourceGroupName -ErrorAction SilentlyContinue) {
-            Write-Output "[-] The resource group '$resourceGroupName' already exists."
+            Write-Output "[*] The resource group '$resourceGroupName' already exists."
         } else {
-            New-AzureRmResourceGroup -Name $ResourceGroupName -Location $location
+            New-AzResourceGroup -Name $ResourceGroupName -Location $location
             Write-Output "[+] Resource group '$ResourceGroupName' created successfully in $location."
         }
     }
@@ -147,114 +189,7 @@ Function Create-ResourceGroup {
     }
 }
 
-###### Create Azure KeyVault ######
-
-# Function to create a Key Vault
-function Create-KeyVault {
-  param(
-    [string]$keyVaultName,
-    [string]$secretValue,
-    [string]$resourceGroupName
-  )
-
-  # Check if Key Vault exists
-  $keyVault = Get-AzKeyVault -VaultName $keyVaultName
-  if (!$keyVault) {
-    # Create the Key Vault
-    $keyVault = New-AzKeyVault -VaultName $keyVaultName -Location $location -ResourceGroupName $resourceGroupName
-  }
-  
-  $vaultSecret = ConvertTo-SecureString $secretValue -AsPlainText -Force
-
-  # Add a secret to the Key Vault
-  Set-AzKeyVaultSecret -VaultName $keyVaultName -Name "HTBKeyVault" -SecretValue $vaultSecret
-
-  # Return the Key Vault object
-  return $keyVault
-}
-
-# Create Resource Group 
-Create-ResourceGroup -ResourceGroupName "RG-KeyVault"
-
-# Call the function to create the Key Vault and add the secret
-$keyVaultInfo = Create-KeyVault -keyVaultName "htb-secret" -secretValue "ImHack1nGTooM4ch!" -resourceGroupName "RG-KeyVault"
-Write-Output "[+] KeyVault $($keyVaultInfo[0].VaultName) created successfully."
-
-# Set Read Privileges to Ava.Taylor for the KeyVault
-Set-AzKeyVaultAccessPolicy -UserPrincipalName Ava.Taylor@$primaryDomain -VaultName $keyVaultInfo[0].VaultName -PermissionsToKeys all -PermissionsToSecrets all -PermissionsToCertificates all -PermissionsToStorage all -PassThru
-
-# Add user as reader Resource Group KeyVault
-Assign-ResourceGroupRole -userPrincipalName Ava.Taylor@$primaryDomain -ResourceGroupName "RG-KeyVault" -RoleDefinitionName Contributor
-
-
-## Create Groups
-
-$groupnames = @("HR Group", "IT Support", "SysAdmins", "VPN Admin", "Infrastructure", "Managers", "Database", "Site Admins", "Subscription Reader")
-
-function Create-AzureADGroups {
-  param(
-    [string[]]$groupNames
-  )
-  
-    foreach ($groupName in $groupNames) {
-        $findGroup = Get-AzureADMSGroup -Filter "displayName eq '$groupName'"
-        if (!$findGroup) {
-            Try {
-                $group = New-AzureADMSGroup -DisplayName $groupName -MailEnabled $False -SecurityEnabled $True -MailNickName $groupName.Replace(" ", "") 
-                Write-Output "[+] Group $groupName created successfully!"
-            }
-            Catch {
-                Write-Error "[-] Error creating group $groupName $_"
-            }
-        }
-    }
-}
-
-Create-AzureADGroups -groupNames $groupnames
-
-Function Add-MemberToGroup {
-    param(
-    [string[]]$userPrincipalName,
-    [string[]]$groupName
-    )
-
-    $user = Get-AzureADUser -Filter "userPrincipalName eq '$userPrincipalName'"
-
-    # Get the group object for "HR Group"
-    $group = Get-AzureADGroup -Filter "displayName eq '$groupName'"
-
-    # Assign the role "Group Member Manager" to the user for the "HR Group" group
-    Add-AzureADGroupMember -ObjectId $group.ObjectId -RefObjectId $user.ObjectId
-    Write-Output "[+] Added user: $($user.DisplayName) to group: $groupName successfully!"
-}
-
-Add-MemberToGroup -userPrincipalName Abigail.Davis@$primaryDomain -groupName "HR Group"
-Add-MemberToGroup -userPrincipalName Charlotte.Moore@$primaryDomain -groupName "SysAdmins"
-
-Function Make-GroupOwner {
-    param(
-    [string[]]$userPrincipalName,
-    [string[]]$groupName
-    )
-    Try {
-        $group = Get-AzureADMSGroup -Filter "displayName eq '$groupName'"
-        $user = Get-AzureADUser -Filter "userPrincipalName eq '$userPrincipalName'"
-
-        # Add the user as an owner to the group
-        Add-AzureADGroupOwner -ObjectId $group.Id -RefObjectId (Get-AzureADUser -Filter "userPrincipalName eq '$userPrincipalName'").ObjectId
-        Write-OutPut "[+] Added user $($user.DisplayName) as owner to group $groupName"
-    }
-    Catch {
-        Write-Error "[-] Error adding user as Group Owner $_"
-    }
-    
-}
-
-Make-GroupOwner -userPrincipalName Abigail.Davis@$primaryDomain -groupName "HR Group"
-Make-GroupOwner -userPrincipalName Charlotte.Moore@$primaryDomain -groupName "Subscription Reader"
-
-### Add reader rights over the subscription to Subscription Reader
-New-AzRoleAssignment -ObjectId $(Get-AzureADGroup -SearchString "Subscription Reader").ObjectId -RoleDefinitionName "Reader" -Scope "/subscriptions/$subscriptionId"
+## Assign Resource Group with Role
 
 Function Assign-ResourceGroupRole {
     param (
@@ -271,31 +206,207 @@ Function Assign-ResourceGroupRole {
         # Get the Azure role definition
         $role = Get-AzRoleDefinition -Name $RoleDefinitionName
 
-        # Assign the role to the user for the specified resource group
-        New-AzRoleAssignment -ObjectId $user.ObjectId -RoleDefinitionId $role.Id -Scope "/subscriptions/$subscriptionId/resourceGroups/$ResourceGroupName"
+        # Check if the role is already assigned to the user for the specified resource group
+        if (Get-AzRoleAssignment -ObjectId $user.ObjectId -Scope "/subscriptions/$subscriptionId/resourceGroups/$ResourceGroupName" -RoleDefinitionName $RoleDefinitionName -ErrorAction SilentlyContinue) {
+            Write-Output "[*] Role '$RoleDefinitionName' is already assigned to $($user.DisplayName) for resource group '$ResourceGroupName'!"
+        } else {
+            # Assign the role to the user for the specified resource group
+            New-AzRoleAssignment -ObjectId $user.ObjectId -RoleDefinitionId $role.Id -Scope "/subscriptions/$subscriptionId/resourceGroups/$ResourceGroupName"
 
-        Write-Output "[+] Added Role '$RoleDefinitionName' to $($user.DisplayName) successfully!"
+            Write-Output "[+] Added Role '$RoleDefinitionName' to $($user.DisplayName) for resource group '$ResourceGroupName' successfully!"
+        }
     } catch {
         Write-Error "[-] Error while assigning role: $_"
     }
 }
 
+###### Create Azure KeyVault ######
+
+# Function to create or update a Key Vault and set the HTBKeyVault secret
+function Create-KeyVault {
+  param(
+    [string]$userPrincipalName,
+    [string]$keyVaultName,
+    [string]$secretValue,
+    [string]$resourceGroupName
+  )
+
+  # Get the Azure Active Directory user
+  $user = Get-AzureADUser -Filter "userPrincipalName eq '$userPrincipalName'"
+
+  # Check if Key Vault exists
+  $keyVault = Get-AzKeyVault -VaultName $keyVaultName
+  if ($keyVault) {
+    Write-Output "[*] Key Vault '$keyVaultName' already exists."
+  } else {
+    # Create the Key Vault
+    $keyVault = New-AzKeyVault -VaultName $keyVaultName -Location $location -ResourceGroupName $resourceGroupName
+    Write-Output "[+] Key Vault '$keyVaultName' created successfully."
+  }
+  
+  # Check if secret exists in the Key Vault
+  $secret = Get-AzKeyVaultSecret -VaultName $keyVaultName -Name "HTBKeyVault"
+  if ($secret) {
+    Write-Output "[*] Secret 'HTBKeyVault' already exists in '$keyVaultName'."
+  } else {
+    # Add a secret to the Key Vault
+    $vaultSecret = ConvertTo-SecureString $secretValue -AsPlainText -Force
+    Set-AzKeyVaultSecret -VaultName $keyVaultName -Name "HTBKeyVault" -SecretValue $vaultSecret
+    Write-Output "[+] Secret 'HTBKeyVault' added to '$keyVaultName' successfully."
+  }
+
+    Set-AzKeyVaultAccessPolicy -VaultName $keyVaultName -ObjectId $user.ObjectId -PermissionsToKeys all -PermissionsToSecrets all -PermissionsToCertificates all -PermissionsToStorage all
+    Write-Output "[+] Access policy for $($user.DisplayName) has been set successfully."
+}
+
+# Create Resource Group 
+Write-Output "`n## Creating Resource Group"
+Create-ResourceGroup -ResourceGroupName "RG-KeyVault"
 Create-ResourceGroup -ResourceGroupName "Developers"
+
+# Call the function to create the Key Vault and add the secret
+Write-Output "`n## Creating Key Vault"
+Create-KeyVault -keyVaultName "htb-secret" -secretValue "ImHack1nGTooM4ch!" -resourceGroupName "RG-KeyVault" -userPrincipalName Ava.Taylor@$primaryDomain
+
+Write-Output "`n## Assigning Resource Group Role"
+Assign-ResourceGroupRole -userPrincipalName Ava.Taylor@$primaryDomain -ResourceGroupName "RG-KeyVault" -RoleDefinitionName Contributor
 Assign-ResourceGroupRole -userPrincipalName Ava.Taylor@$primaryDomain -ResourceGroupName Developers -RoleDefinitionName Contributor
 
-Function Create-AzureVM {
+$groupnames = @("HR Group", "IT Support", "SysAdmins", "VPN Admin", "Infrastructure", "Managers", "Database", "Site Admins", "Subscription Reader")
+
+## Create Groups
+function Create-AzureADGroups {
+  param(
+    [string[]]$groupNames
+  )
+  
+  foreach ($groupName in $groupNames) {
+    # Check if group already exists
+    $findGroup = Get-AzureADMSGroup -Filter "displayName eq '$groupName'"
+    if (!$findGroup) {
+      try {
+        # Create the group if it doesn't exist
+        $group = New-AzureADMSGroup -DisplayName $groupName -MailEnabled $False -SecurityEnabled $True -MailNickName $groupName.Replace(" ", "") 
+        Write-Output "[+] Group $groupName created successfully!"
+      } catch {
+        Write-Error "[-] Error creating group '$groupName': $_"
+      }
+    } else {
+      Write-Output "[*] Group $groupName already exists."
+    }
+  }
+}
+
+Write-Output "`n## Creating Groups"
+Create-AzureADGroups -groupNames $groupnames
+
+function Add-MemberToGroup {
+    param(
+        [string]$userPrincipalName,
+        [string]$groupName
+    )
+
+    # Get the Azure AD user
+    $user = Get-AzureADUser -Filter "userPrincipalName eq '$userPrincipalName'"
+    if (!$user) {
+        Write-Error "[-] User '$userPrincipalName' not found in Azure AD"
+        return
+    }
+
+    # Get the Azure AD group
+    $group = Get-AzureADGroup -Filter "displayName eq '$groupName'"
+    if (!$group) {
+        Write-Error "[-] Group '$groupName' not found in Azure AD"
+        return
+    }
+
+    # Check if the user is already a member of the group
+    $isMember = Get-AzureADGroupMember -ObjectId $group.ObjectId | Where-Object {$_.ObjectType -eq "User"} | Where-Object {$_.UserPrincipalName -eq $user.UserPrincipalName}
+    if ($isMember) {
+        Write-Output "[*] User '$userPrincipalName' is already a member of group '$groupName'"
+        return
+    }
+
+    # Add the user to the group
+    Add-AzureADGroupMember -ObjectId $group.ObjectId -RefObjectId $user.ObjectId
+
+    Write-Output "[+] User '$userPrincipalName' added to group '$groupName'"
+}
+
+Write-Output "`n## Adding Members to Groups"
+Add-MemberToGroup -userPrincipalName Abigail.Davis@$primaryDomain -groupName "HR Group"
+Add-MemberToGroup -userPrincipalName Charlotte.Moore@$primaryDomain -groupName "SysAdmins"
+
+function Make-GroupOwner {
+    param(
+        [string]$userPrincipalName,
+        [string]$groupName
+    )
+
+    Try {
+        $group = Get-AzureADMSGroup -Filter "displayName eq '$groupName'"
+        $user = Get-AzureADUser -Filter "userPrincipalName eq '$userPrincipalName'"
+
+        # Check if user is already an owner of the group
+        $owners = Get-AzureADGroupOwner -ObjectId $group.Id
+        $isOwner = $owners.ObjectId -contains $user.ObjectId
+        if ($isOwner) {
+            Write-Output "[+] User $($user.DisplayName) is already an owner of group $groupName"
+            return
+        }
+
+        # Add the user as an owner to the group
+        Add-AzureADGroupOwner -ObjectId $group.Id -RefObjectId $user.ObjectId
+        Write-OutPut "[+] Added user $($user.DisplayName) as owner to group $groupName"
+    }
+    Catch {
+        Write-Error "[-] Error adding user as Group Owner: $_"
+    }
+}
+
+Write-Output "`n## Making Users Group's Owner"
+Make-GroupOwner -userPrincipalName Abigail.Davis@$primaryDomain -groupName "HR Group"
+Make-GroupOwner -userPrincipalName Charlotte.Moore@$primaryDomain -groupName "Subscription Reader"
+
+### Add reader rights over the subscription to Subscription Reader
+$readerGroup = Get-AzureADGroup -SearchString "Subscription Reader"
+$readerRole = Get-AzRoleAssignment -ObjectId $readerGroup.ObjectId -Scope "/subscriptions/$subscriptionId"
+
+# Check if the role assignment exists
+if ($readerRole) {
+    Write-Output "[*] The role assignment for '$($readerGroup.DisplayName)' already exists."
+} else {
+    # Assign the Reader role to the Subscription Reader group
+    New-AzRoleAssignment -ObjectId $readerGroup.ObjectId -RoleDefinitionName "Reader" -Scope "/subscriptions/$subscriptionId"
+    Write-Output "[+] The role assignment for '$($readerGroup.DisplayName)' was added successfully."
+}
+
+function Create-AzureVM {
     param (
         [string]$vmName,
-        [string]$vmSize = "Standard_B1s",
         [string]$resourceGroupName,
         [string]$adminUsername,
         [string]$adminPassword
     )
 
+    $vm = Get-AzVM -ResourceGroupName $resourceGroupName -Name $vmName -ErrorAction SilentlyContinue
+
+    if ($vm) {
+        Write-Output "[*] VM '$vmName' already exists."
+        return
+    }
+
+    $vmSizes = Get-AzVMSize -Location $location
+    $selectedVMSize = $vmSizes | Where-Object {$_.Name -eq "Standard_B1s"}
+    if ($selectedVMSize -eq $null) {
+        $selectedVMSize = $vmSizes | Where-Object {$_.Name -eq "Standard_B2s"}
+    }
+    $selectedSize = $selectedVMSize.Name
+
     New-AzVm `
     -ResourceGroupName $resourceGroupName `
     -Name $vmName `
-    -Size $vmSize `
+    -Size $selectedSize `
     -Location $location `
     -VirtualNetworkName 'myVnet' `
     -SubnetName 'mySubnet' `
@@ -304,17 +415,11 @@ Function Create-AzureVM {
     -OpenPorts 80,3389 `
     -Credential (New-Object System.Management.Automation.PSCredential -ArgumentList $adminUsername, $(ConvertTo-SecureString -String $adminPassword -AsPlainText -Force))
 
-    Write-Output "[+] VM '$vmName' Created successfully!"
+    Write-Output "[+] VM '$vmName' created successfully!"
 }
 
-$vmSizes = Get-AzVMSize -Location $location
-$selectedVMSize = $vmSizes | Where-Object {$_.Name -eq "Standard_B1s"}
-if ($selectedVMSize -eq $null) {
-    $selectedVMSize = $vmSizes | Where-Object {$_.Name -eq "Standard_B2s"}
-}
-$selectedSize = $selectedVMSize.Name
-
-Create-AzureVM -vmName "AzVM-01" -vmSize $selectedSize -resourceGroupName Production -adminUsername webadmin -adminPassword "SuperPassword123!"
+Write-Output "`n## Creating Azure VMs"
+Create-AzureVM -vmName "AzVM-01" -resourceGroupName Production -adminUsername webadmin -adminPassword "SuperPassword123!"
 
 Function Add-AzureADUserToRole {
     param (
@@ -332,7 +437,7 @@ Function Add-AzureADUserToRole {
         }
 
         if ([string]::IsNullOrEmpty($node)) {
-            Write-Output "No Object Found. Aborting..."
+            Write-Output "[-] No Object Found. Aborting..."
             break
         }
 
@@ -351,10 +456,18 @@ Function Add-AzureADUserToRole {
             $role = Get-AzureADDirectoryRole | Where-Object { $_.DisplayName -eq $roleName }
         }
 
-        # Assign the role to the user
-        Add-AzureADDirectoryRoleMember -ObjectId $role.ObjectId -RefObjectId $node.ObjectId
+        # Check if the user already has the role
+        $roleMember = Get-AzureADDirectoryRoleMember -ObjectId $role.ObjectId | Where-Object { $_.ObjectId -eq $node.ObjectId }
 
-        Write-Output "[+] Added Role '$roleName' to $($node.DisplayName) successfully!"
+        if ($roleMember) {
+            Write-Output "[*] The role '$roleName' is already assigned to $($node.DisplayName). Skipping..."
+        }
+        else {
+            # Assign the role to the user
+            Add-AzureADDirectoryRoleMember -ObjectId $role.ObjectId -RefObjectId $node.ObjectId
+
+            Write-Output "[+] Added Role '$roleName' to $($node.DisplayName) successfully!"
+        }
     }  
     catch {
         Write-Error "[-] Error while assigning role: $_"
@@ -364,8 +477,8 @@ Function Add-AzureADUserToRole {
 # This Role is like GA
 # Add-AzureADUserToRole -userPrincipalName Charlotte.Moore@$primaryDomain -roleName "Privileged Role Administrator"
 
+Write-Output "`n## Add Role to Users"
 Add-AzureADUserToRole -userPrincipalName Emily.Smith@$primaryDomain -roleName "User Administrator"
-
 Add-AzureADUserToRole -userPrincipalName Isabella.Miller@$primaryDomain -roleName "Password Administrator"
 
 function Create-ServicePrincipalWithOwner {
@@ -374,26 +487,34 @@ function Create-ServicePrincipalWithOwner {
         [Parameter(Mandatory=$true)][string]$userPrincipalName
     )
 
-    # Create the Service Principal
-    $sp = New-AzADServicePrincipal -DisplayName $servicePrincipalName
+    # Check if the Service Principal already exists
+    $sp = Get-AzADServicePrincipal -DisplayName $servicePrincipalName -ErrorAction SilentlyContinue
+    if ($sp) {
+        Write-Output "[*] Service Principal '$servicePrincipalName' already exists!"
+    }
+    else {
+        # Create the Service Principal
+        $sp = New-AzADServicePrincipal -DisplayName $servicePrincipalName
+        Write-Output "[+] Service Principal '$servicePrincipalName' created successfully!"
+    }
 
-    Write-Output "[+] Service Principal '$servicePrincipalName' Created successfully!"
+    # Check if the User is already Owner of the Service Principal
+    $owner = Get-AzureADServicePrincipalOwner -ObjectId $sp.Id -All $true | Where-Object { $_.UserPrincipalName -eq $userPrincipalName }
+    if ($owner) {
+        Write-Output "[*] User '$userPrincipalName' is already Owner of Service Principal '$servicePrincipalName'!"
+    }
+    else {
+        # Get the User Object
+        $user = Get-AzureADUser -Filter "userPrincipalName eq '$userPrincipalName'"
 
-    # Remove Default Privileges
-    Remove-AzRoleAssignment -ObjectId $sp.Id -RoleDefinitionName 'Contributor'
+        # Assign the User as Owner of the Service Principal
+        Add-AzureADServicePrincipalOwner -ObjectId $sp.Id -RefObjectId $user.ObjectId
 
-    # Add Reader Privileges (Needs ApplicationId instead of ObjectId)
-    New-AzRoleAssignment -ApplicationId $sp.ApplicationId -RoleDefinitionName 'Reader'
-
-    # Get the User Object
-    $user = Get-AzureADUser -Filter "userPrincipalName eq '$userPrincipalName'"
-
-    # Assign the User as Owner of the Service Principal
-    Add-AzureADServicePrincipalOwner -ObjectId $sp.Id -RefObjectId $user.ObjectId
-
-    Write-Output "[+] Added Owner $($user.DisplayName) to '$servicePrincipalName' successfully!"
+        Write-Output "[+] User '$userPrincipalName' added as Owner of Service Principal '$servicePrincipalName' successfully!"
+    }
 }
 
+Write-Output "`n## Creating Service Principals"
 Create-ServicePrincipalWithOwner -servicePrincipalName "Web2.0" -userPrincipalName "Mia.Wilson@$primaryDomain" 
 
 Add-AzureADUserToRole -servicePrincipalName "Web2.0" -roleName "Application Administrator"
@@ -418,7 +539,7 @@ Function Add-AzRoleToVM {
         }
 
         if ([string]::IsNullOrEmpty($node)) {
-            Write-Output "No Object Found. Aborting..."
+            Write-Output "[-] No Object Found. Aborting..."
             break
         }
 
@@ -427,12 +548,20 @@ Function Add-AzRoleToVM {
         $vmResourceId = $vm.Id
 
         # Set the owner role for the user on the virtual machine
-        New-AzRoleAssignment -ObjectId $node.ObjectId -RoleDefinitionName $roleName -Scope "/subscriptions/$subscriptionId/resourceGroups/$vmResourceGroup/providers/Microsoft.Compute/virtualMachines/$vmName"
-        Write-Output "[+] Added Role '$roleName' to $($node.DisplayName) for VM '$vmName' successfully!"
+        $currentRole = Get-AzRoleAssignment -ObjectId $node.ObjectId -RoleDefinitionName $roleName -Scope "/subscriptions/$subscriptionId/resourceGroups/$vmResourceGroup/providers/Microsoft.Compute/virtualMachines/$vmName"
+
+        if ($currentRole) {
+            Write-Output "[*] The role assignment for '$($readerGroup.DisplayName)' already exists."
+        } else {
+            # Assign the role to the AzVM
+            New-AzRoleAssignment -ObjectId $node.ObjectId -RoleDefinitionName $roleName -Scope "/subscriptions/$subscriptionId/resourceGroups/$vmResourceGroup/providers/Microsoft.Compute/virtualMachines/$vmName"
+            Write-Output "[+] Added Role '$roleName' to $($node.DisplayName) for VM '$vmName' successfully!"
+        }
     }  
     Catch {
         Write-Error "[-] Error while assigning role: $_"
     }
 }
 
+Write-Output "`n## Adding Role to User for Azure VMs"
 Add-AzRoleToVM -userPrincipalName "Madison.Johnson@$primaryDomain" -roleName Owner -vmResourceGroup Production -vmName "AzVM-01"
