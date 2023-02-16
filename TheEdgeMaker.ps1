@@ -136,13 +136,8 @@ Function Create-AzureADUsers {
         $PasswordProfile.ForceChangePasswordNextLogin = $false
 
         # Create the user in Azure AD
-        $user = New-AzureADUser `
-                -AccountEnabled $true `
-                -DisplayName $displayName `
-                -MailNickName $MailNickName `
-                -UserPrincipalName $userPrincipalName `
-                -PasswordProfile $PasswordProfile
-
+        $user = New-AzureADUser -AccountEnabled $true -DisplayName $displayName -MailNickName $MailNickName -UserPrincipalName $userPrincipalName -PasswordProfile $PasswordProfile      
+        
         Write-OutPut "[+] AAD Account Created Successfully - $displayName"
 
         # Add the user and password to the user list
