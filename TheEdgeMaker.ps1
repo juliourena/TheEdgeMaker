@@ -103,7 +103,7 @@ Function Create-AzureADUsers {
   $userList = @()
 
   # Loop through the number of users
-  Try {
+  
     for ($i = 0; $i -lt $NumberOfUsers; $i++) {
 
         $selectedName = $names[$i]
@@ -118,10 +118,14 @@ Function Create-AzureADUsers {
         # Create the user principal name
         $userPrincipalName = "$selectedName.$selectedLastName@$primaryDomain"
 
-        # Check if the user already exists
-        if ((Get-AzureADUser -ObjectId $userPrincipalName -ErrorAction SilentlyContinue) -ne $null) {
-            Write-Output "[*] AAD Account Already Exists - $displayName"
-            continue
+        Try {
+            # Check if the user already exists
+            if ((Get-AzureADUser -ObjectId $userPrincipalName -ErrorAction SilentlyContinue) -ne $null) {
+                Write-Output "[*] AAD Account Already Exists - $displayName"
+                continue
+            }
+        } Catch 
+        {
         }
 
         # Create a random password
@@ -134,23 +138,23 @@ Function Create-AzureADUsers {
         }
 
         $PasswordProfile.ForceChangePasswordNextLogin = $false
-
-        # Create the user in Azure AD
-        $user = New-AzureADUser -AccountEnabled $true -DisplayName $displayName -MailNickName $MailNickName -UserPrincipalName $userPrincipalName -PasswordProfile $PasswordProfile      
+        Try {
+            # Create the user in Azure AD
+            $user = New-AzureADUser -AccountEnabled $true -DisplayName $displayName -MailNickName $MailNickName -UserPrincipalName $userPrincipalName -PasswordProfile $PasswordProfile      
         
-        Write-OutPut "[+] AAD Account Created Successfully - $displayName"
+            Write-OutPut "[+] AAD Account Created Successfully - $displayName"
+        }Catch {
+            Write-Error "[-] Failed to create user: $names[$i]"
+        }
 
         # Add the user and password to the user list
         $userList += New-Object PSObject -Property @{
             "UserPrincipalName" = $userPrincipalName
             "Password" = $PasswordProfile.Password
         }
-        
     }
-  }
-  Catch {
-    Write-Error "[-] Failed to create user: $names[$i]"
-  }
+        
+   
   
   # Save the list of users and passwords to a file in the current directory
   try {
