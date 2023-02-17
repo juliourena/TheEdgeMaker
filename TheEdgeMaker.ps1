@@ -72,7 +72,7 @@ $tenantDetails = Get-AzTenant -TenantId $tenantId
 $primaryDomain = $tenantDetails.Domains | Select-Object -First 1
 
 Write-Host "`n## Tenant Information"
-Write-Host "Tenant: $tenantDetails.Domains"
+Write-Host "Tenant: $($tenantDetails.Domains)"
 
 # Prompt the user if they want to change the default location
 $response = Read-Host "`nThe current location is '$($global:location)'. Do you want to change it? (Y/N)"
@@ -267,7 +267,21 @@ Create-ResourceGroup -ResourceGroupName "Developers"
 
 # Call the function to create the Key Vault and add the secret
 Write-Output "`n## Creating Key Vault"
-Create-KeyVault -keyVaultName "htb-secret" -secretValue "ImHack1nGTooM4ch!" -resourceGroupName "RG-KeyVault" -userPrincipalName Ava.Taylor@$primaryDomain
+$keyVaultName = "htb-secret" + $primaryDomain
+$maxLen = 24
+$randNums = Get-Random -Minimum 0 -Maximum 99999
+$newName = $keyVaultName.Replace(".", "").Replace("onmicrosoftcom", "")
+
+# If the length is greater than 24, truncate the string
+if ($newName.Length -gt $maxLen) {
+    $newName = $newName.Substring(0, $maxLen)
+}
+
+# Replace the last 5 characters with random numbers
+$newName = $newName.Substring(0, $maxLen-5) + $randNums.ToString().PadLeft(5, '0')
+
+$keyVaultName = $newName
+Create-KeyVault -keyVaultName $keyVaultName -secretValue "ImHack1nGTooM4ch!" -resourceGroupName "RG-KeyVault" -userPrincipalName Ava.Taylor@$primaryDomain
 
 Write-Output "`n## Assigning Resource Group Role"
 Assign-ResourceGroupRole -userPrincipalName Ava.Taylor@$primaryDomain -ResourceGroupName "RG-KeyVault" -RoleDefinitionName Contributor
@@ -539,7 +553,7 @@ Function Add-AzRoleToVM {
         $currentRole = Get-AzRoleAssignment -ObjectId $node.ObjectId -RoleDefinitionName $roleName -Scope "/subscriptions/$subscriptionId/resourceGroups/$vmResourceGroup/providers/Microsoft.Compute/virtualMachines/$vmName"
 
         if ($currentRole) {
-            Write-Output "[*] The role assignment for '$($readerGroup.DisplayName)' already exists."
+            Write-Output "[*] The role assignment for '$($node.DisplayName)' already exists."
         } else {
             # Assign the role to the AzVM
             New-AzRoleAssignment -ObjectId $node.ObjectId -RoleDefinitionName $roleName -Scope "/subscriptions/$subscriptionId/resourceGroups/$vmResourceGroup/providers/Microsoft.Compute/virtualMachines/$vmName"
