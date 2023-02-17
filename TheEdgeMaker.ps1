@@ -71,8 +71,11 @@ $tenantDetails = Get-AzTenant -TenantId $tenantId
 # Extract the primary domain from the Domains property
 $primaryDomain = $tenantDetails.Domains | Select-Object -First 1
 
+Write-Host "`n## Tenant Information"
+Write-Host "Tenant: $tenantDetails.Domains"
+
 # Prompt the user if they want to change the default location
-$response = Read-Host "The current location is '$($global:location)'. Do you want to change it? (Y/N)"
+$response = Read-Host "`nThe current location is '$($global:location)'. Do you want to change it? (Y/N)"
 
 # If the user responds with 'Y' or 'y', prompt them for a new location
 if ($response.ToLower() -eq 'y') {
