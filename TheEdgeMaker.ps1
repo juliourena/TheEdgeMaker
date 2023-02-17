@@ -502,7 +502,7 @@ function Create-ServicePrincipalWithOwner {
 Write-Output "`n## Creating Service Principals"
 Create-ServicePrincipalWithOwner -servicePrincipalName "Web2.0" -userPrincipalName "Mia.Wilson@$primaryDomain" 
 
-Add-AzureADUserToRole -servicePrincipalName "Web2.0" -roleName "Application Administrator"
+# Add-AzureADUserToRole -servicePrincipalName "Web2.0" -roleName "Application Administrator"
 # Add-AzureADUserToRole -servicePrincipalName "Web2.0" -roleName "Privileged Role Administrator"
 
 Function Add-AzRoleToVM {
@@ -550,6 +550,7 @@ Function Add-AzRoleToVM {
 
 Write-Output "`n## Adding Role to User for Azure VMs"
 Add-AzRoleToVM -userPrincipalName "Madison.Johnson@$primaryDomain" -roleName Owner -vmResourceGroup Production -vmName "AzVM-01"
+Add-AzRoleToVM -servicePrincipalName "Web2.0" -roleName Owner -vmResourceGroup Production -vmName "AzVM-01"
 
 ### Add reader rights over the subscription to Subscription Reader
 $readerGroup = Get-AzureADGroup -SearchString "Subscription Reader"
